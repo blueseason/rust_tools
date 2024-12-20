@@ -1,4 +1,5 @@
 use my_macro::{count_exprs, hello_marco, recurrence, *};
+//#![feature(trace_macros)]
 
 fn main() {
     hello_marco!();
@@ -63,4 +64,19 @@ fn main() {
 
     recognize_tree!(expand_to_larch!()); // 无法直接使用 `expand_to_larch!` 的展开结果
     call_with_larch!(recognize_tree); // 回调就是给另一个宏传入宏的名称 (`ident`)，而不是宏的结果
+
+    callback!(callback(println("Yes, this *was* unnecessary.")));
+
+    let strings: [String; 3] = init_array![String::from("hi!"); 3];
+    println!("{:?}", strings);
+
+    //  trace_macros!(true);
+    let array: [usize; 4] = init_array1![0; 3; first 0];
+    println!("{:?}", array);
+
+    //    let array: [usize; 64] = init_array_r![0;63; first 0];
+    assert_eq!(
+        tuple_default!(i32, bool, String),
+        (i32::default(), bool::default(), String::default())
+    );
 }

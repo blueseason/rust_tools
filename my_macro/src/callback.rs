@@ -31,3 +31,10 @@ macro_rules! recognize_tree {
         println!("I don't know; some kind of birch maybe?")
     };
 }
+
+#[macro_export]
+macro_rules! callback {
+    ($callback:ident( $($args:tt)* )) => {
+        $callback!( $($args)* )
+    };
+}

@@ -1,4 +1,10 @@
+mod basic;
 mod callback;
+mod internal;
+mod parse;
+mod pushdown_acc;
+mod repeat;
+mod tt_muchcher;
 
 #[macro_export]
 macro_rules! hello_marco {
@@ -144,4 +150,5 @@ fn main() {
     for e in fib.take(10) {
         println!("{}", e)
     }
+    let array: [usize; 4] = init_array1![0; 3; first 0];
 }
