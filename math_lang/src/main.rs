@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, iter::Peekable};
 
 
 #[derive(Debug,Clone,PartialEq)]
@@ -41,6 +41,7 @@ impl Rule {
     fn apply_all(&self, expr: &Expr) -> Expr {
         use Expr::*;
         if let Some(bindings) = pattern_match(&self.head,expr) {
+            //sub bindings with body
             subsitute_bindings(&bindings,&self.body)
         }else {
             match expr {
@@ -68,7 +69,6 @@ fn pattern_match(pattern:&Expr,value: &Expr) -> Option<Bindings> {
             (Sym (name),_) => {
                 if let Some(bound_value) = bindings.get(name){
                     bound_value == value
-
                 }else {
                     bindings.insert(name.clone(),value.clone());
                     true   
@@ -121,9 +121,81 @@ impl Display for Rule {
         write!(f,"{} = {}", self.head,self.body)
     }
 }
+#[derive(Debug)]
+enum TokenKind {
+    Sym(String),
+    OpenParen,
+    CloeParen,
+    Comma,
+    Equals
+     
+}
+
+#[derive(Debug)]
+struct Token {
+    kind: TokenKind,
+//    text: String,
+}
+
+struct Lexer<Chars: Iterator<Item=char>> {
+    chars: Peekable<Chars>
+}
  
+impl<Chars: Iterator<Item=char>> Lexer<Chars> {
+    fn from_iter(chars: Chars) -> Self {
+        Self {chars: chars.peekable()}   
+    }
+     /// 辅助函数：读取连续的符号字符，构造完整的符号字符串
+    fn lex_symbol(&mut self, first: char) -> String {
+        let mut sym = String::new();
+        sym.push(first);
+
+        // 根据需要定义什么是符号的一部分，这里举例：字母、数字、下划线
+        while let Some(&ch) = self.chars.peek() {
+            if ch.is_alphanumeric() || ch == '_' {
+                self.chars.next();
+                sym.push(ch);
+            } else {
+                break;
+            }
+        }
+        sym
+    }
+}
+impl<Chars: Iterator<Item=char>> Iterator for Lexer<Chars> {
+    type Item = Token;
+    fn next(&mut self) -> Option<Token> {
+        let token = self.chars.next();
+        match token {
+            Some(ch) => {
+                match ch {
+                    '(' => Some(Token {
+                        kind: TokenKind::OpenParen,
+                      }),
+                    ')' => Some(Token {
+                        kind: TokenKind::CloeParen,
+                      }),
+                    ',' => Some(Token {
+                        kind: TokenKind::Comma,
+                    }),
+                    '=' => Some(Token {
+                        kind: TokenKind::Equals,
+                    }),
+                    _ => {
+                        Some(Token {
+                            kind:TokenKind::Sym(self.lex_symbol(ch)),})   
+                    }
+                }
+            }
+            None => None,
+        }
+    }
+}
 fn main() {
-    // swap(pair(a,b)) = pair(b,a)
+    // 
+    for token in Lexer::from_iter("swap(pair(a,b)) = pair(b,a)".chars()) {
+        println!("{:?}",token);
+    }
     use Expr::*;
     let swap = Rule {
         head: Fun("swap".to_string(),
