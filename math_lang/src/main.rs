@@ -1,5 +1,7 @@
-use std::{collections::HashMap, fmt::Display, iter::Peekable};
+use std::{collections::HashMap, fmt::Display};
+mod lexer;
 
+use crate::lexer::Lexer;
 
 #[derive(Debug,Clone,PartialEq)]
 enum Expr {
@@ -121,113 +123,54 @@ impl Display for Rule {
         write!(f,"{} = {}", self.head,self.body)
     }
 }
-#[derive(Debug)]
-enum TokenKind {
-    Sym(String),
-    OpenParen,
-    CloeParen,
-    Comma,
-    Equals
-     
-}
 
-#[derive(Debug)]
-struct Token {
-    kind: TokenKind,
-//    text: String,
-}
-
-struct Lexer<Chars: Iterator<Item=char>> {
-    chars: Peekable<Chars>
-}
- 
-impl<Chars: Iterator<Item=char>> Lexer<Chars> {
-    fn from_iter(chars: Chars) -> Self {
-        Self {chars: chars.peekable()}   
-    }
-     /// 辅助函数：读取连续的符号字符，构造完整的符号字符串
-    fn lex_symbol(&mut self, first: char) -> String {
-        let mut sym = String::new();
-        sym.push(first);
-
-        // 根据需要定义什么是符号的一部分，这里举例：字母、数字、下划线
-        while let Some(&ch) = self.chars.peek() {
-            if ch.is_alphanumeric() || ch == '_' {
-                self.chars.next();
-                sym.push(ch);
-            } else {
-                break;
-            }
-        }
-        sym
-    }
-}
-impl<Chars: Iterator<Item=char>> Iterator for Lexer<Chars> {
-    type Item = Token;
-    fn next(&mut self) -> Option<Token> {
-        let token = self.chars.next();
-        match token {
-            Some(ch) => {
-                match ch {
-                    '(' => Some(Token {
-                        kind: TokenKind::OpenParen,
-                      }),
-                    ')' => Some(Token {
-                        kind: TokenKind::CloeParen,
-                      }),
-                    ',' => Some(Token {
-                        kind: TokenKind::Comma,
-                    }),
-                    '=' => Some(Token {
-                        kind: TokenKind::Equals,
-                    }),
-                    _ => {
-                        Some(Token {
-                            kind:TokenKind::Sym(self.lex_symbol(ch)),})   
-                    }
-                }
-            }
-            None => None,
-        }
-    }
-}
 fn main() {
     // 
     for token in Lexer::from_iter("swap(pair(a,b)) = pair(b,a)".chars()) {
         println!("{:?}",token);
     }
-    use Expr::*;
-    let swap = Rule {
-        head: Fun("swap".to_string(),
-            vec![Fun("pair".to_string(),
-                vec![Sym("a".to_string()), Sym("b".to_string())])]),
-        body: Fun("pair".to_string(),
-            vec![Sym("b".to_string()),Sym("a".to_string())]),
-    };
 
-
-    // Pattern: swap(pair(a,b))
-    let pattern = Fun("foo".to_string(),vec![Sym("x".to_string()),Sym("x".to_string())]);
-    // Value: swp(pair(f(c),g(d)))
-    let value = Fun("foo".to_string(),
-        vec![Fun("swap".to_string(),
-            vec![Fun("pair".to_string(),
-                vec![Fun("f".to_string(),vec![Sym("a".to_string())]),
-                    Fun("g".to_string(),vec![Sym("b".to_string())])])]),
-            Fun("swap".to_string(),
-                vec![Fun("pair".to_string(),
-                    vec![Fun("m".to_string(),vec![Sym("c".to_string())]),
-                        Fun("n".to_string(),vec![Sym("d".to_string())])])])]);
-    println!("Rule:   {}",swap);
-    println!("Expr:  {}",value);
-    println!("Expr:  {}",swap.apply_all(&value));
-    if let Some(bindings) = pattern_match(&pattern,&value){
-        println!("MATCH:");
-        for (k,v) in bindings.iter() {
-            println!("{}  => {}",k,v)
-        }
-    }else {
-        println!("NO MATCH!")
-    }
 //    println!("{:?}",pattern_match(&pattern,&value));
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use Expr::*;
+    #[test]
+    pub fn test_apply_all() {
+        let swap = Rule {
+            head: Fun("swap".to_string(),
+                vec![Fun("pair".to_string(),
+                    vec![Sym("a".to_string()), Sym("b".to_string())])]),
+            body: Fun("pair".to_string(),
+                vec![Sym("b".to_string()),Sym("a".to_string())]),
+        };
+
+
+        // Pattern: swap(pair(a,b))
+        let pattern = Fun("foo".to_string(),vec![Sym("x".to_string()),Sym("x".to_string())]);
+        // Value: swp(pair(f(c),g(d)))
+        let value = Fun("foo".to_string(),
+            vec![Fun("swap".to_string(),
+                vec![Fun("pair".to_string(),
+                    vec![Fun("f".to_string(),vec![Sym("a".to_string())]),
+                        Fun("g".to_string(),vec![Sym("b".to_string())])])]),
+                Fun("swap".to_string(),
+                    vec![Fun("pair".to_string(),
+                        vec![Fun("m".to_string(),vec![Sym("c".to_string())]),
+                            Fun("n".to_string(),vec![Sym("d".to_string())])])])]);
+        println!("Rule:   {}",swap);
+        println!("Expr:  {}",value);
+        println!("Expr:  {}",swap.apply_all(&value));
+
+        if let Some(bindings) = pattern_match(&pattern,&value){
+            println!("MATCH:");
+            for (k,v) in bindings.iter() {
+                println!("{}  => {}",k,v)
+            }
+        }else {
+            println!("NO MATCH!")
+        }
+    }
 }
