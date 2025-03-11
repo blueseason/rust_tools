@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Display};
 mod lexer;
 
-use crate::lexer::Lexer;
+//use crate::lexer::Lexer;
 
 #[derive(Debug,Clone,PartialEq)]
 enum Expr {
@@ -124,11 +124,28 @@ impl Display for Rule {
     }
 }
 
+
+macro_rules! sym {
+    ($name:ident) => {
+        Expr::Sym(stringify!($name).to_string())
+    }
+}
+
+macro_rules! fun {
+    ($name:ident) => {
+        Expr::Fun(stringify!($name).to_string(),vec![])
+    };
+    ($name:ident,$($args:expr),*) => {
+        Expr::Fun(stringify!($name).to_string(),vec![$($args),*])
+    }
+}
 fn main() {
     // 
-    for token in Lexer::from_iter("swap(pair(a,b)) = pair(b,a)".chars()) {
-        println!("{:?}",token);
-    }
+    // for token in Lexer::from_iter("swap(pair(a,b)) = pair(b,a)".chars()) {
+    //     println!("{:?}",token);
+    // }
+    println!("{}",fun!(f));
+    println!("{}",fun!(f,sym!(a),sym!(b)));
 
 //    println!("{:?}",pattern_match(&pattern,&value));
 }
@@ -140,26 +157,23 @@ mod test {
     #[test]
     pub fn test_apply_all() {
         let swap = Rule {
-            head: Fun("swap".to_string(),
-                vec![Fun("pair".to_string(),
-                    vec![Sym("a".to_string()), Sym("b".to_string())])]),
-            body: Fun("pair".to_string(),
-                vec![Sym("b".to_string()),Sym("a".to_string())]),
+            head: fun!(swap,fun!(pair,sym!(a), sym!(b))),
+            body: fun!(pair,sym!(b),sym!(a))
         };
 
 
         // Pattern: swap(pair(a,b))
-        let pattern = Fun("foo".to_string(),vec![Sym("x".to_string()),Sym("x".to_string())]);
+        let pattern = fun!(foo,sym!(x),sym!(x));
         // Value: swp(pair(f(c),g(d)))
-        let value = Fun("foo".to_string(),
-            vec![Fun("swap".to_string(),
-                vec![Fun("pair".to_string(),
-                    vec![Fun("f".to_string(),vec![Sym("a".to_string())]),
-                        Fun("g".to_string(),vec![Sym("b".to_string())])])]),
-                Fun("swap".to_string(),
-                    vec![Fun("pair".to_string(),
-                        vec![Fun("m".to_string(),vec![Sym("c".to_string())]),
-                            Fun("n".to_string(),vec![Sym("d".to_string())])])])]);
+        let value = fun!(foo,
+            fun!(swap,
+                fun!(pair,
+                    fun!(f,sym!(a)),
+                    fun!(g,sym!(b)))),
+            fun!(swap,
+                fun!(pair,
+                    fun!(m,sym!(c)),
+                    fun!(n,sym!(d)))));
         println!("Rule:   {}",swap);
         println!("Expr:  {}",value);
         println!("Expr:  {}",swap.apply_all(&value));

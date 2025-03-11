@@ -41,6 +41,7 @@ impl<Chars: Iterator<Item=char>> Lexer<Chars> {
         sym
     }
 }
+
 impl<Chars: Iterator<Item=char>> Iterator for Lexer<Chars> {
     type Item = Token;
     fn next(&mut self) -> Option<Token> {
