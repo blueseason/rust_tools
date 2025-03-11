@@ -39,6 +39,7 @@ fn subsitute_bindings(bindings: &Bindings, expr: &Expr) -> Expr {
         }
     }
 }
+
 impl Rule {
     fn apply_all(&self, expr: &Expr) -> Expr {
         use Expr::*;
@@ -124,30 +125,49 @@ impl Display for Rule {
     }
 }
 
+macro_rules! fun_args {
+    // f()
+    () => {vec![]};
+    // f(a)
+    ($name:ident) => { vec![expr!($name)]};
+    // f(a,b,c)
+    ($name:ident,$($rest:tt)*) => {
+        { //need this block to do macro expension
+            let mut t = vec![expr!($name)];
+            t.append(& mut fun_args!($($rest)*));
+            t
+        }
+    };
+    // f(f(a,b))
+    ($name:ident($($args:tt)*)) => {
+        vec![expr!($name($($args)*))]
+    };
 
-macro_rules! sym {
+    // f(f(a),...)
+    ($name:ident($($args:tt)*),$($rest:tt)*) => {
+        {
+            let mut t = vec![expr!($name($($args)*))];
+            t.append(& mut fun_args!($($rest)*));
+            t
+        }
+    };
+}
+macro_rules! expr {
     ($name:ident) => {
         Expr::Sym(stringify!($name).to_string())
-    }
-}
-
-macro_rules! fun {
-    ($name:ident) => {
-        Expr::Fun(stringify!($name).to_string(),vec![])
     };
-    ($name:ident,$($args:expr),*) => {
-        Expr::Fun(stringify!($name).to_string(),vec![$($args),*])
-    }
+    //(name,arg1,arg2,...)
+    ($name:ident($($args:tt)*)) => {
+        Expr::Fun(stringify!($name).to_string(),fun_args!($($args)*))
+    };
 }
 fn main() {
-    // 
-    // for token in Lexer::from_iter("swap(pair(a,b)) = pair(b,a)".chars()) {
-    //     println!("{:?}",token);
-    // }
-    println!("{}",fun!(f));
-    println!("{}",fun!(f,sym!(a),sym!(b)));
-
-//    println!("{:?}",pattern_match(&pattern,&value));
+    println!("{}",expr!(a));
+    println!("{}",expr!(f()));
+    println!("{}",expr!(f(a)));
+    println!("{}",expr!(f(a,b)));
+    println!("{}",expr!(f(f(b))));
+    println!("{}",expr!(f(f(a),g(b))));
 }
 
 #[cfg(test)]
@@ -157,17 +177,17 @@ mod test {
     #[test]
     pub fn test_apply_all() {
         let swap = Rule {
-            head: fun!(swap,fun!(pair,sym!(a), sym!(b))),
-            body: fun!(pair,sym!(b),sym!(a))
+            head: expr!(swap(pair(a,b))),
+            body: expr!(pair(b,a)),
         };
 
         // Value: swap(foo,swap(pair(f(a),g(b)),swap(pair(m(c),n(d))))
-        let input = fun!(foo,
-            fun!(swap, fun!(pair, fun!(f,sym!(a)), fun!(g,sym!(b)))),
-            fun!(swap, fun!(pair, fun!(m,sym!(c)), fun!(n,sym!(d)))));
-        let out  = fun!(foo,
-            fun!(pair, fun!(g,sym!(b)),  fun!(f,sym!(a))),
-            fun!(pair, fun!(n,sym!(d)),  fun!(m,sym!(c))));
+        let input = expr!(
+            foo(swap(pair(f(a), g(b))),
+                swap(pair(m(c), n(d)))));
+        let out  = expr!(
+            foo(pair(g(b),f(a)),
+                pair(n(d),m(c))));
         assert_eq!(swap.apply_all(&input),out);
     }
 }
