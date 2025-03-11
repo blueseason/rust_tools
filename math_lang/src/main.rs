@@ -161,30 +161,13 @@ mod test {
             body: fun!(pair,sym!(b),sym!(a))
         };
 
-
-        // Pattern: swap(pair(a,b))
-        let pattern = fun!(foo,sym!(x),sym!(x));
-        // Value: swp(pair(f(c),g(d)))
-        let value = fun!(foo,
-            fun!(swap,
-                fun!(pair,
-                    fun!(f,sym!(a)),
-                    fun!(g,sym!(b)))),
-            fun!(swap,
-                fun!(pair,
-                    fun!(m,sym!(c)),
-                    fun!(n,sym!(d)))));
-        println!("Rule:   {}",swap);
-        println!("Expr:  {}",value);
-        println!("Expr:  {}",swap.apply_all(&value));
-
-        if let Some(bindings) = pattern_match(&pattern,&value){
-            println!("MATCH:");
-            for (k,v) in bindings.iter() {
-                println!("{}  => {}",k,v)
-            }
-        }else {
-            println!("NO MATCH!")
-        }
+        // Value: swap(foo,swap(pair(f(a),g(b)),swap(pair(m(c),n(d))))
+        let input = fun!(foo,
+            fun!(swap, fun!(pair, fun!(f,sym!(a)), fun!(g,sym!(b)))),
+            fun!(swap, fun!(pair, fun!(m,sym!(c)), fun!(n,sym!(d)))));
+        let out  = fun!(foo,
+            fun!(pair, fun!(g,sym!(b)),  fun!(f,sym!(a))),
+            fun!(pair, fun!(n,sym!(d)),  fun!(m,sym!(c))));
+        assert_eq!(swap.apply_all(&input),out);
     }
 }
