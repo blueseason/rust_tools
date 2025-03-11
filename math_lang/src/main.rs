@@ -1,7 +1,9 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, iter::Peekable};
 mod lexer;
 
-//use crate::lexer::Lexer;
+use lexer::{Token,TokenKind};
+
+use crate::lexer::Lexer;
 
 #[derive(Debug,Clone,PartialEq)]
 enum Expr {
@@ -9,6 +11,42 @@ enum Expr {
     Fun(String, Vec<Expr>),
 }
 
+impl Expr {
+    // becasue Peekbal Iterator , so need to be mut
+    fn parse_peekable(lex: &mut Peekable<impl Iterator<Item=Token>>) -> Self {
+        if let Some(token)  = lex.next() {
+            match token.kind {
+                TokenKind::Sym => {
+                    if let Some(_) = lex.next_if(|t|t.kind == TokenKind::OpenParen){
+                        let mut args = Vec::new();
+                        if let Some(_) = lex.next_if(|t|t.kind == TokenKind::CloseParen){
+                            return Expr::Fun(token.text,args)
+                        }
+                        args.push(Self::parse_peekable(lex));
+                        while let Some(_) = lex.next_if(|t|t.kind == TokenKind::Comma){
+                            args.push(Self::parse_peekable(lex));
+                        }
+
+                        if lex.next_if(|t|t.kind == TokenKind::CloseParen).is_none(){
+                            todo!("expected close paren");
+                        }
+                        Expr::Fun(token.text, args)
+                    }else {
+                        Expr::Sym(token.text)
+                    }                    
+                },
+                _ => {
+                    todo!("unexpected token")
+                }
+            }
+        }else {
+            todo!("EOF error")
+        }
+    }
+    fn parse(lex: impl Iterator<Item=Token>) -> Self {
+        Self::parse_peekable(&mut lex.peekable())
+    }
+}
 #[derive(Debug)]
 struct Rule {
     head: Expr,
@@ -168,12 +206,17 @@ fn main() {
     println!("{}",expr!(f(a,b)));
     println!("{}",expr!(f(f(b))));
     println!("{}",expr!(f(f(a),g(b))));
+    let expr = "swap(pair(pair(c,d), pair(a,b)))";
+    let swap = Rule {
+        head: expr!(swap(pair(a,b))),
+        body: expr!(pair(b,a)),
+    };
+    println!("{}", swap.apply_all(&Expr::parse(Lexer::from_iter(expr.chars()))));
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use Expr::*;
     #[test]
     pub fn test_apply_all() {
         let swap = Rule {
