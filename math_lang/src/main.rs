@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display, io::{stdin, stdout, Write}, iter::Peekable};
+use std::{collections::HashMap, fmt::Display, fs, io::{self, stdin, stdout, Write}, iter::Peekable};
 mod lexer;
 
 use lexer::{Token,TokenKind};
@@ -10,9 +10,11 @@ enum Expr {
     Sym(String),
     Fun(String, Vec<Expr>),
 }
+#[derive(Debug)]
 enum Error {
     UnexpectedToken(TokenKind, Token),
     UnexpectedEOF(TokenKind),
+    IoError(io::Error)
 }
 
 impl Expr {
@@ -31,7 +33,7 @@ impl Expr {
                             args.push(Self::parse_peekable(lex)?);
                         }
 
-                        // should not peek
+                        // should not peek because peek do not advance the iterator
                         if let Some(t) = lex.next() {
                             if t.kind == TokenKind::CloseParen {
                                  Ok(Expr::Fun(token.text, args))
@@ -90,6 +92,13 @@ fn subsitute_bindings(bindings: &Bindings, expr: &Expr) -> Expr {
 }
 
 impl Rule {
+     fn parse(lexer: &mut Peekable<impl Iterator<Item=Token>>) -> Result<Rule, Error> {
+        let head = Expr::parse_peekable(lexer)?;
+        expect_token_kind(lexer, TokenKind::Equals)?;
+        let body = Expr::parse_peekable(lexer)?;
+        Ok(Rule{head, body})
+    }
+    
     fn apply_all(&self, expr: &Expr) -> Expr {
         use Expr::*;
         if let Some(bindings) = pattern_match(&self.head,expr) {
@@ -210,8 +219,53 @@ macro_rules! expr {
         Expr::Fun(stringify!($name).to_string(),fun_args!($($args)*))
     };
 }
+
+type Rules = HashMap<String,Rule>;
+
+fn expect_token_kind(lexer: &mut Peekable<impl Iterator<Item=Token>>, kind: TokenKind) -> Result<Token, Error> {
+    let token = lexer.next().ok_or(Error::UnexpectedEOF(kind.clone()))?;
+    if token.kind == kind {
+        Ok(token)
+    } else {
+        Err(Error::UnexpectedToken(kind, token))
+    }
+}
+fn parse_rule_file(path: &str) -> Result<Rules,Error> {
+    let mut rules = Rules::new();
+    let tokens = fs::read_to_string(path).map_err(|e| Error::IoError(e))?;
+    let mut lex = {
+        let mut lex = Lexer::from_iter(tokens.chars());
+        lex.set_file_path(path);
+        lex.peekable()
+    };
+
+    while let Some(_) = lex.peek() {
+        let name = expect_token_kind(&mut lex, TokenKind::Sym)?;
+        expect_token_kind(&mut lex, TokenKind::Colon)?;
+        let rule = Rule::parse(&mut lex)?;
+        rules.insert(name.text, rule);
+    }
+    Ok(rules)
+}
+
 fn main() {
-//    let expr = "swap(pair(pair(c,d), pair(a,b)))";
+    //    let expr = "swap(pair(pair(c,d), pair(a,b)))";
+    let default_rules_path = "rules.m";
+    let rules = match parse_rule_file(default_rules_path) {
+        Ok(rules) => {
+            println!("INFO: successfully loaded rules from {}", default_rules_path);
+            rules
+        }
+        Err(err) => {
+            eprintln!("ERROR: could not read file {}: {:?}", default_rules_path, err);
+            Default::default()
+        }
+    };
+
+    println!("Available rules:");
+    for (name, rule) in rules {
+        println!("{} : {}", name, rule);
+    }
     let swap = Rule {
         head: expr!(swap(pair(a,b))),
         body: expr!(pair(b,a)),
@@ -229,10 +283,13 @@ fn main() {
             Err(Error::UnexpectedToken(expected, actual)) => {
                 println!("{:>width$}^", "", width=prompt.len() + actual.loc.col);
                 println!("ERROR: expected {} but got {} '{}'", expected, actual.kind, actual.text)
-            }
+            },
             Err(Error::UnexpectedEOF(expected)) => {
                 println!("{:>width$}^", "", width=prompt.len() + command.len());
                 println!("ERROR: expected {} but got nothing", expected)
+            },
+            Err(Error::IoError(io_error)) => {
+                unreachable!("IO ERROR: {}", io_error)
             }
         }
     }
@@ -246,9 +303,9 @@ mod test {
         let swap = Rule {
             head: expr!(swap(pair(a,b))),
             body: expr!(pair(b,a)),
+        // Value: swap(foo,swap(pair(f(a),g(b)),swap(pair(m(c),n(d))))
         };
 
-        // Value: swap(foo,swap(pair(f(a),g(b)),swap(pair(m(c),n(d))))
         let input = expr!(
             foo(swap(pair(f(a), g(b))),
                 swap(pair(m(c), n(d)))));
