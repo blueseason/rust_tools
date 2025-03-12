@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display, iter::Peekable};
+use std::{collections::HashMap, fmt::Display, io::{stdin, stdout, Write}, iter::Peekable};
 mod lexer;
 
 use lexer::{Token,TokenKind};
@@ -10,40 +10,49 @@ enum Expr {
     Sym(String),
     Fun(String, Vec<Expr>),
 }
+enum Error {
+    UnexpectedToken(TokenKind, Token),
+    UnexpectedEOF(TokenKind),
+}
 
 impl Expr {
     // becasue Peekbal Iterator , so need to be mut
-    fn parse_peekable(lex: &mut Peekable<impl Iterator<Item=Token>>) -> Self {
+    fn parse_peekable(lex: &mut Peekable<impl Iterator<Item=Token>>) -> Result<Self,Error> {
         if let Some(token)  = lex.next() {
             match token.kind {
                 TokenKind::Sym => {
                     if let Some(_) = lex.next_if(|t|t.kind == TokenKind::OpenParen){
                         let mut args = Vec::new();
                         if let Some(_) = lex.next_if(|t|t.kind == TokenKind::CloseParen){
-                            return Expr::Fun(token.text,args)
+                            return Ok(Expr::Fun(token.text,args))
                         }
-                        args.push(Self::parse_peekable(lex));
+                        args.push(Self::parse_peekable(lex)?);
                         while let Some(_) = lex.next_if(|t|t.kind == TokenKind::Comma){
-                            args.push(Self::parse_peekable(lex));
+                            args.push(Self::parse_peekable(lex)?);
+                        }
+                        if let Some(t) = lex.peek() {
+                            if t.kind == TokenKind::CloseParen {
+                                 Ok(Expr::Fun(token.text, args))
+                            }else {
+                                 Err(Error::UnexpectedToken(TokenKind::CloseParen, t.clone()))
+                            }
+                        }else {
+                            Err(Error::UnexpectedEOF(TokenKind::CloseParen))
                         }
 
-                        if lex.next_if(|t|t.kind == TokenKind::CloseParen).is_none(){
-                            todo!("expected close paren");
-                        }
-                        Expr::Fun(token.text, args)
                     }else {
-                        Expr::Sym(token.text)
+                        Ok(Expr::Sym(token.text))
                     }                    
                 },
                 _ => {
-                    todo!("unexpected token")
+                    Err(Error::UnexpectedToken(TokenKind::Sym, token))
                 }
             }
         }else {
-            todo!("EOF error")
+            Err(Error::UnexpectedEOF(TokenKind::Sym))
         }
     }
-    fn parse(lex: impl Iterator<Item=Token>) -> Self {
+    fn parse(lex: impl Iterator<Item=Token>) -> Result<Self,Error> {
         Self::parse_peekable(&mut lex.peekable())
     }
 }
@@ -200,18 +209,31 @@ macro_rules! expr {
     };
 }
 fn main() {
-    println!("{}",expr!(a));
-    println!("{}",expr!(f()));
-    println!("{}",expr!(f(a)));
-    println!("{}",expr!(f(a,b)));
-    println!("{}",expr!(f(f(b))));
-    println!("{}",expr!(f(f(a),g(b))));
-    let expr = "swap(pair(pair(c,d), pair(a,b)))";
+//    let expr = "swap(pair(pair(c,d), pair(a,b)))";
     let swap = Rule {
         head: expr!(swap(pair(a,b))),
         body: expr!(pair(b,a)),
     };
-    println!("{}", swap.apply_all(&Expr::parse(Lexer::from_iter(expr.chars()))));
+
+    let mut command = String::new();
+    let prompt = "> ";
+    loop {
+        command.clear();
+        print!("{}",prompt);
+        stdout().flush().unwrap();
+        stdin().read_line(&mut command).unwrap();
+        match Expr::parse(Lexer::from_iter(command.chars())) {
+            Ok(expr) => println!("{}",swap.apply_all(&expr)),
+            Err(Error::UnexpectedToken(expected, actual)) => {
+                println!("{:>width$}^", "", width=prompt.len() + actual.loc.col);
+                println!("ERROR: expected {} but got {} '{}'", expected, actual.kind, actual.text)
+            }
+            Err(Error::UnexpectedEOF(expected)) => {
+                println!("{:>width$}^", "", width=prompt.len() + command.len());
+                println!("ERROR: expected {} but got nothing", expected)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
