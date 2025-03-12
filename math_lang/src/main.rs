@@ -30,7 +30,9 @@ impl Expr {
                         while let Some(_) = lex.next_if(|t|t.kind == TokenKind::Comma){
                             args.push(Self::parse_peekable(lex)?);
                         }
-                        if let Some(t) = lex.peek() {
+
+                        // should not peek
+                        if let Some(t) = lex.next() {
                             if t.kind == TokenKind::CloseParen {
                                  Ok(Expr::Fun(token.text, args))
                             }else {
