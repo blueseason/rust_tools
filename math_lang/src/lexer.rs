@@ -17,9 +17,24 @@ impl Display for Loc {
     }
 }
 
+macro_rules! token_kind_enum {
+    ($($kind:ident),* $(,)?) => {
+        #[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
+        pub enum TokenKind {
+            $($kind),*
+        }
 
-#[derive(Debug,PartialEq,Clone)]
-pub enum TokenKind {
+        pub const TOKEN_KIND_ITEMS: [TokenKind; [$(TokenKind::$kind),*].len()] = [$(TokenKind::$kind),*];
+    }
+}
+
+token_kind_enum! {
+    //Rule Keywords
+    Rule,
+    Shape,
+    Apply,
+    Done,
+    
     Sym,
     OpenParen,
     CloseParen,
@@ -27,6 +42,67 @@ pub enum TokenKind {
     Colon,
     Equals,
     Invalid,
+    End,
+}
+
+type TokenKindSetInnerType = u64;
+#[derive(Debug, PartialEq, Clone, Copy, Eq, Hash)]
+pub struct TokenKindSet(TokenKindSetInnerType);
+
+impl TokenKindSet {
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
+    pub const fn single(kind: TokenKind) -> Self {
+        Self::empty().set(kind)
+    }
+
+    pub const fn set(self, kind: TokenKind) -> Self {
+        let TokenKindSet(set) = self;
+        TokenKindSet(set | (1 << kind as TokenKindSetInnerType))
+    }
+
+    pub const fn unset(self, kind: TokenKind) -> Self {
+        let TokenKindSet(set) = self;
+        TokenKindSet(set & !(1 << kind as TokenKindSetInnerType))
+    }
+
+    pub fn contains(&self, kind: TokenKind) -> bool {
+        let TokenKindSet(set) = self;
+        (set & (1 << kind as u64)) > 0
+    }
+}
+
+impl std::fmt::Display for TokenKindSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let xs: Vec<TokenKind> = TOKEN_KIND_ITEMS.iter().cloned().filter(|kind| self.contains(*kind)).collect();
+        match xs.len() {
+            0 => write!(f, "nothing"),
+            1 => write!(f, "{}", xs[0]),
+            n => {
+                write!(f, "{}", xs[0])?;
+                for i in 1..n-1 {
+                    write!(f, ", {}", xs[i])?
+                }
+                write!(f, ", or {}", xs[n-1])
+            }
+        }
+    }
+}
+
+#[allow(dead_code)]
+const TOKEN_KIND_SIZE_ASSERT: [(); (TOKEN_KIND_ITEMS.len() < TokenKindSetInnerType::BITS as usize) as usize] = [()];
+
+fn keyword_by_name(name: &str) -> Option<TokenKind> {
+    match name {
+        "rule" => Some(TokenKind::Rule),
+        "shape" => Some(TokenKind::Shape),
+        "apply" => Some(TokenKind::Apply),
+        "done" => Some(TokenKind::Done),
+        _ => None,         
+     }
+
 }
 
 impl Display for TokenKind {
@@ -36,10 +112,15 @@ impl Display for TokenKind {
             Sym => write!(f,"{}","symbol"),
             OpenParen => write!(f, "open paren"),
             CloseParen => write!(f, "close paren"),
+            Rule => write!(f, "`rule`"),
+            Shape => write!(f, "`shape`"),
+            Apply => write!(f, "`apply`"),
+            Done => write!(f, "`done`"),
             Comma => write!(f, "comma"),
             Colon => write!(f, "colon"),            
             Equals => write!(f, "equals"),
             Invalid => write!(f, "invalid token"),
+            End => write!(f, "end of token"),
         }
     }
 }
@@ -58,6 +139,7 @@ pub struct Lexer<Chars: Iterator<Item=char>> {
     lnum: usize,
     bol: usize,
     cnum: usize,
+    exhausted: bool,
 }
  
 impl<Chars: Iterator<Item=char>> Lexer<Chars> {
@@ -69,6 +151,7 @@ impl<Chars: Iterator<Item=char>> Lexer<Chars> {
             lnum: 0,
             bol: 0,
             cnum: 0,
+            exhausted:  false
         }   
     }
 
@@ -89,7 +172,7 @@ impl<Chars: Iterator<Item=char>> Iterator for Lexer<Chars> {
     type Item = Token;
     fn next(&mut self) -> Option<Token> {
         //look ahead use next_if
-        if self.invalid { return None}
+        if self.exhausted { return None}
         
         while let Some(x) = self.chars.next_if(|x| x.is_whitespace()) {
             self.cnum += 1;
@@ -111,19 +194,27 @@ impl<Chars: Iterator<Item=char>> Iterator for Lexer<Chars> {
                 ':' => Some(Token {kind: TokenKind::Colon, text, loc}),                
                 _ => {
                     if !ch.is_alphanumeric() {
-                        self.invalid = true;
+                        self.exhausted = true;
                         Some(Token{kind: TokenKind::Invalid, text, loc})
                     }else {
                         while let Some(x) = self.chars.next_if(|x| x.is_alphanumeric()) {
                             self.cnum += 1;
                             text.push(x);
                         }
-                        Some(Token{kind: TokenKind::Sym, text, loc})
+                        
+                        if let Some(kind) = keyword_by_name(&text) {
+                            Some(Token{kind, text, loc})
+                        } else {
+                            Some(Token{kind: TokenKind::Sym, text, loc})
+                        }
                     }
                 }
             }
         } else {
-            None
+            self.cnum += 1;
+            self.exhausted = true;
+            Some(Token{kind: TokenKind::End, text: "".to_string(), loc})
         }
     }
+    
 }
