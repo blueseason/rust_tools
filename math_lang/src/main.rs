@@ -224,7 +224,8 @@ fn expect_token_kind(lexer: &mut Peekable<impl Iterator<Item=Token>>, kind: Toke
 #[derive(Default)]
 struct Context {
     rules: HashMap<String, Rule>,
-    current_expr: Option<Expr>
+    current_expr: Option<Expr>,
+    quit: bool
 }
 
 impl Context {
@@ -233,7 +234,8 @@ impl Context {
             .set(TokenKind::Rule)
             .set(TokenKind::Shape)
             .set(TokenKind::Apply)
-            .set(TokenKind::Done);
+            .set(TokenKind::Done)
+            .set(TokenKind::Quit);
         let keyword = expect_token_kind(lexer, expected_tokens)?;
         match keyword.kind {
             TokenKind::Rule => {
@@ -301,11 +303,20 @@ impl Context {
                     return Err(Error::NoShapingInPlace(keyword.loc))
                 }
             }
+            TokenKind::Quit => {
+                self.quit = true;
+            }
             _ => unreachable!("Expected {} but got {}", expected_tokens, keyword.kind),
         }
         Ok(())
     }
 }
+
+fn eprint_repl_loc_cursor(prompt: &str, loc: &Loc) {
+    assert!(loc.row == 1);
+    eprintln!("{:>width$}^", "", width=prompt.len() + loc.col - 1);
+}
+
 
 fn main() {
     let mut args = env::args();
@@ -318,7 +329,7 @@ fn main() {
             lexer.set_file_path(&file_path);
             lexer.peekable()
         };
-        while lexer.peek().expect("Completely exhausted lexer").kind != TokenKind::End {
+        while !context.quit && lexer.peek().expect("Completely exhausted lexer").kind != TokenKind::End {
             if let Err(err) = context.process_command(&mut lexer) {
                 match err {
                     Error::UnexpectedToken(expected_kinds, actual_token) => {
@@ -347,7 +358,7 @@ fn main() {
         let mut command = String::new();
         let prompt = "> ";
         
-        loop {
+        while !context.quit {
             command.clear();
             print!("{}",prompt);
             stdout().flush().unwrap();
@@ -357,24 +368,24 @@ fn main() {
                 .and_then(|()| expect_token_kind(&mut lexer, TokenKindSet::single(TokenKind::End)));
             match result {
                 Err(Error::UnexpectedToken(expected, actual)) => {
-                    eprintln!("{:>width$}^", "", width=prompt.len() + actual.loc.col);
+                    eprint_repl_loc_cursor(prompt, &actual.loc);
                     eprintln!("ERROR: expected {} but got {} '{}'", expected, actual.kind, actual.text);
                 }
                 Err(Error::RuleAlreadyExists(name, new_loc, _old_loc)) => {
-                    eprintln!("{:>width$}^", "", width=prompt.len() + new_loc.col);
+                    eprint_repl_loc_cursor(prompt, &new_loc);
                     eprintln!("ERROR: redefinition of existing rule {}", name);
                 }
                 Err(Error::AlreadyShaping(loc)) => {
-                    eprintln!("{:>width$}^", "", width=prompt.len() + loc.col);
+                    eprint_repl_loc_cursor(prompt,&loc);
                     eprintln!("ERROR: already shaping an expression. Finish the current shaping with {} first.",
                         TokenKind::Done);
                 }
                 Err(Error::NoShapingInPlace(loc)) => {
-                    eprintln!("{:>width$}^", "", width=prompt.len() + loc.col);
+                    eprint_repl_loc_cursor(prompt,&loc);
                     eprintln!("ERROR: no shaping in place.");
                 }
                 Err(Error::RuleDoesNotExist(name, loc)) => {
-                    eprintln!("{:>width$}^", "", width=prompt.len() + loc.col);
+                    eprint_repl_loc_cursor(prompt,&loc);
                     eprintln!("ERROR: rule {} does not exist", name);
                 }
                 Ok(_) => {}
@@ -389,6 +400,7 @@ mod test {
     #[test]
     pub fn test_apply_all() {
         let swap = Rule {
+            loc: Loc{file_path:None,row:0,col:0},
             head: expr!(swap(pair(a,b))),
             body: expr!(pair(b,a)),
         // Value: swap(foo,swap(pair(f(a),g(b)),swap(pair(m(c),n(d))))

@@ -34,6 +34,7 @@ token_kind_enum! {
     Shape,
     Apply,
     Done,
+    Quit,
     
     Sym,
     OpenParen,
@@ -96,10 +97,11 @@ const TOKEN_KIND_SIZE_ASSERT: [(); (TOKEN_KIND_ITEMS.len() < TokenKindSetInnerTy
 
 fn keyword_by_name(name: &str) -> Option<TokenKind> {
     match name {
-        "rule" => Some(TokenKind::Rule),
+        "rule"  => Some(TokenKind::Rule),
         "shape" => Some(TokenKind::Shape),
         "apply" => Some(TokenKind::Apply),
-        "done" => Some(TokenKind::Done),
+        "done"  => Some(TokenKind::Done),
+        "quit"  => Some(TokenKind::Quit),
         _ => None,         
      }
 
@@ -116,6 +118,7 @@ impl Display for TokenKind {
             Shape => write!(f, "`shape`"),
             Apply => write!(f, "`apply`"),
             Done => write!(f, "`done`"),
+            Quit => write!(f, "`quit`"),
             Comma => write!(f, "comma"),
             Colon => write!(f, "colon"),            
             Equals => write!(f, "equals"),
@@ -158,13 +161,30 @@ impl<Chars: Iterator<Item=char>> Lexer<Chars> {
     fn loc(&self) -> Loc {
         Loc {
             file_path: self.file_path.clone(),
-            row: self.lnum,
-            col: self.cnum - self.bol,
+            row: self.lnum + 1,
+            col: self.cnum - self.bol + 1,
         }
     }
 
     pub fn set_file_path(&mut self, file_path: &str) {
         self.file_path = Some(file_path.to_string())
+    }
+
+    fn drop_line(&mut self) {
+        while let Some(_) = self.chars.next_if(|x| *x != '\n') {
+            self.cnum += 1
+        }
+        if let Some(_) = self.chars.next_if(|x| *x == '\n') {
+            self.cnum += 1;
+            self.lnum += 1;
+            self.bol = self.cnum
+        }
+    }
+
+    fn trim_whitespaces(&mut self) {
+        while let Some(_) = self.chars.next_if(|x| x.is_whitespace() && *x != '\n') {
+            self.cnum += 1
+        }
     }
 }
 
@@ -173,14 +193,16 @@ impl<Chars: Iterator<Item=char>> Iterator for Lexer<Chars> {
     fn next(&mut self) -> Option<Token> {
         //look ahead use next_if
         if self.exhausted { return None}
-        
-        while let Some(x) = self.chars.next_if(|x| x.is_whitespace()) {
-            self.cnum += 1;
-            if  x == '\n' {
-                self.lnum += 1;
-                self.bol = self.cnum;
+
+        self.trim_whitespaces();
+        while let Some(x) = self.chars.peek() {
+            if *x != '\n' && *x !='#' {
+                break;
             }
+            self.drop_line();
+            self.trim_whitespaces();
         }
+
         let loc = self.loc();
         self.cnum += 1;
         if let Some(ch) = self.chars.next() {
