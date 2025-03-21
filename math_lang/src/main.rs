@@ -6,7 +6,10 @@ use lexer::*;
 #[derive(Debug,Clone,PartialEq)]
 enum Expr {
     Sym(String),
-    Fun(String, Vec<Expr>),
+    Var(String),
+    //1. change Symbol to Expr to accept Var and Sym, or Fun, etc
+    //2. use box becasue of resursive defined Fun with Expr
+    Fun(Box<Expr>, Vec<Expr>),
 }
 #[derive(Debug)]
 enum Error {
@@ -18,7 +21,16 @@ enum Error {
 }
 
 impl Expr {
-    // becasue Peekbal Iterator , so need to be mut
+    
+    fn var_or_sym_from_name(name: &str) -> Expr {
+        if name.chars().next().expect("Empty names are not allowed").is_uppercase() {
+            Expr::Var(name.to_string())
+        } else {
+            Expr::Sym(name.to_string())
+        }
+    }
+    
+    // becasue Peekable Iterator , so need to be mut
     fn parse_peekable(lex: &mut Peekable<impl Iterator<Item=Token>>) -> Result<Self,Error> {
         let token = lex.next().expect("Completely exhausted lexer");
         match token.kind {
@@ -26,7 +38,7 @@ impl Expr {
                 if let Some(_) = lex.next_if(|t|t.kind == TokenKind::OpenParen){
                     let mut args = Vec::new();
                     if let Some(_) = lex.next_if(|t|t.kind == TokenKind::CloseParen){
-                        return Ok(Expr::Fun(token.text,args))
+                        return Ok(Expr::Fun(Box::new(Self::var_or_sym_from_name(&token.text)),args))
                     }
                     args.push(Self::parse_peekable(lex)?);
                     while let Some(_) = lex.next_if(|t|t.kind == TokenKind::Comma){
@@ -36,13 +48,13 @@ impl Expr {
                     // should not peek because peek do not advance the iterator
                     let close_paren = lex.next().expect("Completely exhausted lexer");
                     if close_paren.kind == TokenKind::CloseParen {
-                        Ok(Expr::Fun(token.text, args))
+                        Ok(Expr::Fun(Box::new(Self::var_or_sym_from_name(&token.text)), args))
                     }else {
                         Err(Error::UnexpectedToken(TokenKindSet::single(TokenKind::CloseParen),close_paren))
                     }
 
                 }else {
-                    Ok(Expr::Sym(token.text))
+                    Ok(Self::var_or_sym_from_name(&token.text))
                 }                    
             },
             _ => {
@@ -65,29 +77,27 @@ struct Rule {
 fn subsitute_bindings(bindings: &Bindings, expr: &Expr) -> Expr {
     use Expr::*;
     match expr {
-        Sym(name) => {
+        Sym(_) => expr.clone(),
+        Var(name) => {
             if let Some(value) = bindings.get(name) {
                 value.clone()
             }else {
                 expr.clone()
             }
         },
-        Fun(name,args) => {
-            let new_name =  match bindings.get(name) {
-                Some(Sym(new_name)) => new_name,
-                None => name,
-                Some(_) => panic!("Expected symbol in the rule"),
-            };
+        Fun(head,args) => {
+            let new_head = subsitute_bindings(bindings,head);
             let mut new_args = Vec::new();
             for arg in args {
                 new_args.push(subsitute_bindings(bindings,&arg));
             }
-            Fun(new_name.to_string(),new_args)
+            Fun(Box::new(new_head),new_args)
         }
     }
 }
 
 impl Rule {
+
     fn apply_all(&self, expr: &Expr) -> Expr {
         use Expr::*;
         if let Some(bindings) = pattern_match(&self.head,expr) {
@@ -95,13 +105,14 @@ impl Rule {
             subsitute_bindings(&bindings,&self.body)
         }else {
             match expr {
-                Sym(_) => expr.clone(),
-                Fun(name,args)=> {
+                Sym(_) | Var(_) => expr.clone(),
+                Fun(head,args)=> {
+                    let new_head = self.apply_all(head);
                     let mut new_args = Vec::new();
                     for arg in args {
                         new_args.push(self.apply_all(arg))
                     }
-                    Fun(name.clone(),new_args)
+                    Fun(Box::new(new_head),new_args)
                 }
             }
         }
@@ -116,7 +127,10 @@ fn pattern_match(pattern:&Expr,value: &Expr) -> Option<Bindings> {
     fn pattern_match_inner(pattern: &Expr,value: &Expr,bindings:&mut Bindings) -> bool  {
         use Expr::*;
         match (pattern,value) {
-            (Sym (name),_) => {
+            (Sym(name1),Sym(name2)) => {
+                name1 == name2
+            }
+            (Var(name),_) => {
                 if let Some(bound_value) = bindings.get(name){
                     bound_value == value
                 }else {
@@ -153,7 +167,7 @@ fn pattern_match(pattern:&Expr,value: &Expr) -> Option<Bindings> {
 impl Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Expr::Sym(name) => write!(f,"{}",name),
+            Expr::Sym(name) | Expr::Var(name)=> write!(f,"{}",name),
             Expr::Fun(name,args) => {
                 write!(f,"{}(",name)?;
                 for (i, arg) in args.iter().enumerate() {
@@ -306,7 +320,7 @@ impl Context {
             TokenKind::Quit => {
                 self.quit = true;
             }
-            _ => unreachable!("Expected {} but got {}", expected_tokens, keyword.kind),
+            _ => unreachable!("Expected {} but got {} '{}'", expected_tokens, keyword.kind,keyword.text),
         }
         Ok(())
     }
@@ -333,7 +347,7 @@ fn main() {
             if let Err(err) = context.process_command(&mut lexer) {
                 match err {
                     Error::UnexpectedToken(expected_kinds, actual_token) => {
-                        eprintln!("{}: ERROR: expected {} but got {}", actual_token.loc, expected_kinds, actual_token.kind);
+                        eprintln!("{}: ERROR: expected {} but got {} '{}'", actual_token.loc, expected_kinds, actual_token.kind,actual_token.text);
                     }
                     Error::RuleAlreadyExists(name, new_loc, old_loc) => {
                         eprintln!("{}: ERROR: redefinition of existing rule {}", new_loc, name);
