@@ -35,6 +35,7 @@ token_kind_enum! {
     Apply,
     Done,
     Quit,
+    Undo,
     
     Sym,
     OpenParen,
@@ -102,6 +103,7 @@ fn keyword_by_name(name: &str) -> Option<TokenKind> {
         "apply" => Some(TokenKind::Apply),
         "done"  => Some(TokenKind::Done),
         "quit"  => Some(TokenKind::Quit),
+        "undo"  => Some(TokenKind::Undo),
         _ => None,         
      }
 
@@ -119,6 +121,7 @@ impl Display for TokenKind {
             Apply => write!(f, "`apply`"),
             Done => write!(f, "`done`"),
             Quit => write!(f, "`quit`"),
+            Undo => write!(f,"`undo`"),
             Comma => write!(f, "comma"),
             Colon => write!(f, "colon"),            
             Equals => write!(f, "equals"),

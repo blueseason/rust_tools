@@ -18,6 +18,7 @@ enum Error {
     RuleDoesNotExist(String, Loc),
     AlreadyShaping(Loc),
     NoShapingInPlace(Loc),
+    NoHistory(Loc),
 }
 
 impl Expr {
@@ -239,6 +240,7 @@ fn expect_token_kind(lexer: &mut Peekable<impl Iterator<Item=Token>>, kind: Toke
 struct Context {
     rules: HashMap<String, Rule>,
     current_expr: Option<Expr>,
+    shaping_history: Vec<Expr>,
     quit: bool
 }
 
@@ -249,6 +251,7 @@ impl Context {
             .set(TokenKind::Shape)
             .set(TokenKind::Apply)
             .set(TokenKind::Done)
+            .set(TokenKind::Undo)
             .set(TokenKind::Quit);
         let keyword = expect_token_kind(lexer, expected_tokens)?;
         match keyword.kind {
@@ -289,7 +292,10 @@ impl Context {
                                 // todo!("Throw an error if not a single match for the rule was found")
                                 let new_expr = rule.apply_all(&expr);
                                 println!(" => {}", &new_expr);
-                                self.current_expr = Some(new_expr);
+                                // just move the expr tp history, no copy
+                                self.shaping_history.push(
+                                    self.current_expr.replace(new_expr).expect("current_expr must have something")
+                                );
                             } else {
                                 return Err(Error::RuleDoesNotExist(token.text, token.loc));
                             }
@@ -301,7 +307,9 @@ impl Context {
                             let body = Expr::parse(lexer)?;
                             let new_expr = Rule {loc: token.loc, head, body}.apply_all(&expr);
                             println!(" => {}", &new_expr);
-                            self.current_expr = Some(new_expr);
+                            self.shaping_history.push(
+                                self.current_expr.replace(new_expr).expect("current_expr must have something")
+                            );
                         }
 
                         _ => unreachable!("Expected {} but got {}", expected_kinds, token.kind)
@@ -312,7 +320,20 @@ impl Context {
             }
             TokenKind::Done => {
                 if let Some(_) = &self.current_expr {
-                    self.current_expr = None
+                    self.current_expr = None;
+                    self.shaping_history.clear();
+                } else {
+                    return Err(Error::NoShapingInPlace(keyword.loc))
+                }
+            }
+            TokenKind::Undo => {
+                if let Some(_) = &self.current_expr {
+                    if let Some(previous_expr) = self.shaping_history.pop() {
+                        println!(" => {}", &previous_expr);
+                        self.current_expr.replace(previous_expr);
+                    } else {
+                        return Err(Error::NoHistory(keyword.loc))
+                    }
                 } else {
                     return Err(Error::NoShapingInPlace(keyword.loc))
                 }
@@ -363,6 +384,9 @@ fn main() {
                     Error::NoShapingInPlace(loc) => {
                         eprintln!("{}: ERROR: no shaping in place.", loc);
                     }
+                    Error::NoHistory(loc) => {
+                        eprintln!("{}: ERROR: no history", loc);
+                    }
                 }
                 std::process::exit(1);
             }
@@ -402,6 +426,9 @@ fn main() {
                     eprint_repl_loc_cursor(prompt,&loc);
                     eprintln!("ERROR: rule {} does not exist", name);
                 }
+                Err(Error::NoHistory(loc)) => {
+                    eprintln!("{}: ERROR: no history", loc);
+                }                
                 Ok(_) => {}
             }
         }
