@@ -6,7 +6,7 @@ use bitflags::bitflags;
 use etherparse::IpNumber;
 
 enum State {
-    Listen,
+//    Listen,
     SynRcvd,
     Estab,
     TimeWait,
@@ -168,7 +168,7 @@ impl Connection {
         tcph: etherparse::TcpHeaderSlice,
         data: &[u8]) -> io::Result<Option<Self>> {
             // process the SYN and send ACK/SYN
-            let mut buf =[0u8;1500];
+//            let buf =[0u8;1500];
             if !tcph.syn() {
                 return Ok(None);
             }
@@ -181,7 +181,7 @@ impl Connection {
                     iss,
                     una: iss,
                     nxt: iss,
-                    wnd: wnd,
+                    wnd,
                     up: 0,
 
                     wl1: 0,
@@ -189,7 +189,7 @@ impl Connection {
                 },
                 recv: RecvSeqBlock {
                     irs: tcph.sequence_number(),
-                    nxt: tcph.sequence_number() +1,
+                    nxt: tcph.sequence_number() + 1,
                     wnd: tcph.window_size(),
                     up: 0,
                 },
@@ -303,12 +303,17 @@ impl Connection {
 
             // seq check not valid    
             if !okay {
+                eprintln!("NOT OKAY");
                 self.write(nic, &[])?;
                 return Ok(self.availability());
             }
-            self.recv.nxt = seqn.wrapping_add(slen);
+            // move to handle in estab/fin_wait state
+            //self.recv.nxt = seqn.wrapping_add(slen);
 
             if !tcph.ack() {
+                // got SYN part of initial handshake
+                assert!(data.is_empty());
+                self.recv.nxt = seqn.wrapping_add(1);
                 return Ok(self.availability());
             }
 
@@ -328,18 +333,21 @@ impl Connection {
             }
 
             if let State::Estab | State::FinWait1 | State::FinWait2 = self.state {
-                if !Self::is_between_wrapped(self.send.una, ackn, self.send.nxt.wrapping_add(1)) {
-                    return Ok(self.availability());
+                if Self::is_between_wrapped(self.send.una, ackn, self.send.nxt.wrapping_add(1)) {
+                    self.send.una = ackn;
                 }
-                self.send.una = ackn;
-                // TODO
-                assert!(data.is_empty());
 
+
+                // TODO: prune self.unacked
+                // TODO: if unacked empty and waiting flush, notify
+                // TODO: update window
+
+                // FIXME: we don't support Write yet, so immediately send EOF
                 if let State::Estab = self.state {
                     // now let's terminate the connection!
                     // TODO: needs to be stored in the retransmission queue!
                     self.tcp.fin = true;
-                    self.write(nic, &[])?;
+//                    self.write(nic, &[])?;
                     self.state = State::FinWait1;
                 }
             }
@@ -351,6 +359,31 @@ impl Connection {
                 }
             }
 
+            if let State::Estab | State::FinWait1 | State::FinWait2 = self.state {
+                let mut unread_data_at = (self.recv.nxt - seqn) as usize;
+                if unread_data_at > data.len() {
+                    // we must have received a re-transmitted FIN that we have already seen
+                    // nxt points to beyond the fin, but the fin is not in data!
+                    assert_eq!(unread_data_at, data.len() + 1);
+                    unread_data_at = 0;
+                }
+
+                eprintln!("read data {} of {:?}",unread_data_at,data);
+                self.incoming.extend(&data[unread_data_at..]);
+
+                // Once the TCP takes responsibility for the data it advances
+                // RCV.NXT over the data accepted, and adjusts RCV.WND as
+                // apporopriate to the current buffer availability.  The total of
+                // RCV.NXT and RCV.WND should not be reduced.
+                self.recv.nxt = seqn
+                    .wrapping_add(if tcph.syn() {1} else {0})
+                    .wrapping_add(data.len() as u32)
+                    .wrapping_add(if tcph.fin() { 1 } else { 0 });
+
+                // Send an acknowledgment of the form: <SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK>
+                self.write(nic, &[])?;
+            }
+            
             if tcph.fin() {
                 match self.state {
                     State::FinWait2 => {
@@ -380,8 +413,22 @@ impl Connection {
         };
         Ok(())
     }
-    
+
+    fn wrapping_lt(lhs: u32, rhs: u32) -> bool {
+    // From RFC1323:
+    //     TCP determines if a data segment is "old" or "new" by testing
+    //     whether its sequence number is within 2**31 bytes of the left edge
+    //     of the window, and if it is not, discarding the data as "old".  To
+    //     insure that new data is never mistakenly considered old and vice-
+    //     versa, the left edge of the sender's window has to be at most
+    //     2**31 away from the right edge of the receiver's window.
+    lhs.wrapping_sub(rhs) > (1 << 31)
+}
+
     fn is_between_wrapped(start: u32, x: u32, end: u32) -> bool {
+        Self::wrapping_lt(start, x) && Self::wrapping_lt(x, end)
+    }
+    fn is_between_wrapped_old(start: u32, x: u32, end: u32) -> bool {
         use std::cmp::Ordering;
         match start.cmp(&x) {
             Ordering::Equal => return false,
