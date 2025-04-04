@@ -4,5 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bitflags = "2.9.0"
 etherparse = "0.16.0"
 tun-tap = "0.1.4"
+
+#[[bin]] 的语法代表数组，可以定义多个二进制目标
+[[bin]]
+name = "tcp_rust"
+
+[lib]
+name = "tcp_rust"

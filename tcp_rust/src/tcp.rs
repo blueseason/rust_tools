@@ -1,5 +1,7 @@
+use std::collections::VecDeque;
 use std::io;
 use std::io::Write;
+use bitflags::bitflags;
 
 use etherparse::IpNumber;
 
@@ -18,8 +20,42 @@ pub struct Connection {
     recv: RecvSeqBlock,
     ip: etherparse::Ipv4Header,
     tcp: etherparse::TcpHeader,
+
+    pub(crate) incoming: VecDeque<u8>,
+    pub(crate) unacked: VecDeque<u8>,
+    pub(crate) closed: bool,
+    closed_at: Option<u32>,
 }
 
+
+bitflags! {
+    pub(crate) struct Available: u8 {
+        const READ = 0b00000001;
+        const WRITE = 0b00000010;
+    }
+}
+
+
+impl Connection {
+    pub(crate) fn is_rcv_closed(&self) -> bool {
+        if let State::TimeWait = self.state {
+            // TODO: any state after rcvd FIN, so also CLOSE-WAIT, LAST-ACK, CLOSED, CLOSING
+            true
+        } else {
+            false
+        }
+    }
+
+     fn availability(&self) -> Available {
+        let mut a = Available::empty();
+        if self.is_rcv_closed() || !self.incoming.is_empty() {
+            a |= Available::READ;
+        }
+        // TODO: take into account self.state
+        // TODO: set Available::WRITE
+        a
+    }
+}
 
 //    0                   1                   2                   3
 //    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -171,6 +207,10 @@ impl Connection {
                         iph.source()[2],
                         iph.source()[3],
                     ]).unwrap(),
+                incoming: Default::default(),
+                unacked: Default::default(),
+                closed: false,
+                closed_at: None,
                 
             };
             c.tcp.syn = true;
@@ -220,7 +260,7 @@ impl Connection {
         nic: &mut tun_tap::Iface,
         iph: etherparse::Ipv4HeaderSlice,
         tcph: etherparse::TcpHeaderSlice,
-        data: &[u8]) -> io::Result<()> {
+        data: &[u8]) -> io::Result<Available> {
             // first, check that sequence numbers are valid (RFC 793 S3.3)
             let seqn = tcph.sequence_number();
             let mut slen = data.len() as u32;
@@ -264,12 +304,12 @@ impl Connection {
             // seq check not valid    
             if !okay {
                 self.write(nic, &[])?;
-                return Ok(());
+                return Ok(self.availability());
             }
             self.recv.nxt = seqn.wrapping_add(slen);
 
             if !tcph.ack() {
-                return Ok(());
+                return Ok(self.availability());
             }
 
             let ackn = tcph.acknowledgment_number();
@@ -289,7 +329,7 @@ impl Connection {
 
             if let State::Estab | State::FinWait1 | State::FinWait2 = self.state {
                 if !Self::is_between_wrapped(self.send.una, ackn, self.send.nxt.wrapping_add(1)) {
-                    return Ok(());
+                    return Ok(self.availability());
                 }
                 self.send.una = ackn;
                 // TODO
@@ -321,9 +361,26 @@ impl Connection {
                     _ => unimplemented!(),
                 }
             }
-            Ok(())
+            Ok(self.availability())
         }
 
+    pub(crate) fn close(&mut self) -> io::Result<()> {
+        self.closed = true;
+        match self.state {
+            State::SynRcvd | State::Estab => {
+                self.state = State::FinWait1;
+            }
+            State::FinWait1 | State::FinWait2 => {}
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    "already closing",
+                ))
+            }
+        };
+        Ok(())
+    }
+    
     fn is_between_wrapped(start: u32, x: u32, end: u32) -> bool {
         use std::cmp::Ordering;
         match start.cmp(&x) {
