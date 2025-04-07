@@ -13,6 +13,7 @@ use std::os::unix::io::AsRawFd;
 // 3. use VecDeq as the circular buffer to read/write the incoming and outgoing data
 //    - use extend() to add to buffer
 //    - copy_from_slice() from the head and tail
+// 4. on_tick() to process the retransmission packet, use srtt to determin if need retrans
 
 mod tcp;
 

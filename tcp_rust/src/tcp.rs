@@ -283,8 +283,10 @@ impl Connection {
             // write out the headers and the payload
             let buf_len = buf.len();
             let mut unwritten = &mut buf[..];
-
+            //            println!("unwritten size:{}",unwritten.len());
+            //ip.write_all()方法会自动更新offset
             let _ = self.ip.write(&mut unwritten);
+            //println!("unwritten size after write :{}",unwritten.len());
             let ip_header_ends_at = buf_len - unwritten.len();
 
             // postpone writing the tcp header because we need the payload as one contiguous slice to calculate the tcp checksum
